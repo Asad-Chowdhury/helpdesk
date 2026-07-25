@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { prisma } from './lib/prisma';
 
 const app = express()
 const port = process.env.PORT || 3000;
@@ -20,6 +21,16 @@ app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
+})
+
+app.get('/api/db-health', async (_req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`
+    res.json({ database: 'connected' })
+  } catch (err) {
+    console.error('DB health check failed:', err)
+    res.status(503).json({ database: 'unreachable' })
+  }
 })
 
 app.listen(port, () => {

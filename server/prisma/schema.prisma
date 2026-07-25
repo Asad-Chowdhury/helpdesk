@@ -1,0 +1,11 @@
+// Prisma schema — https://pris.ly/d/prisma-schema
+// Models are added in a later phase (Workspace, User, Category, Ticket, ...).
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
