@@ -1,0 +1,12 @@
+# Secrets — never commit
+context7-api.txt
+.env
+.env.*
+!.env.example
+
+# Dependencies / build output (each project also has its own .gitignore)
+node_modules/
+dist/
+
+*.log
+.DS_Store
