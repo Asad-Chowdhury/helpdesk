@@ -1,11 +1,5 @@
 import { API_BASE_URL } from './api'
-
-export type SignupInput = {
-  workspaceName: string
-  name: string
-  email: string
-  password: string
-}
+import type { SignupValues } from './schemas'
 
 export type SignupResponse = {
   sessionIssued: boolean
@@ -24,7 +18,7 @@ export class SignupError extends Error {
   }
 }
 
-export async function signUp(input: SignupInput): Promise<SignupResponse> {
+export async function signUp(input: SignupValues): Promise<SignupResponse> {
   const res = await fetch(`${API_BASE_URL}/api/signup`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
