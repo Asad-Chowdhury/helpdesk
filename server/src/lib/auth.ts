@@ -27,6 +27,13 @@ export const auth = betterAuth({
   },
   emailAndPassword: {
     enabled: true,
+    // No public registration. Better Auth's raw sign-up endpoint creates a User with
+    // no workspace and no role, which the workspaceId-scoping layer can't place.
+    // Accounts are created server-side instead: the Phase 2 signup flow (Workspace +
+    // first Admin, in one transaction), Phase 3 invites, and the dev seed script.
+    // This gates the public HTTP endpoint only — auth.$context.internalAdapter
+    // createUser/linkAccount still work for those paths.
+    disableSignUp: true,
     // No email transport wired up yet (SendGrid lands in a later phase), so sign-up
     // must not gate on a verification link nobody can receive.
     requireEmailVerification: false,

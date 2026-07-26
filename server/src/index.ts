@@ -5,6 +5,7 @@ import { prisma } from './lib/prisma';
 import { auth } from './lib/auth';
 import { clientOrigins } from './lib/env';
 import { requireAuth } from './middleware/require-auth';
+import { signupRouter } from './routes/signup';
 
 const app = express()
 const port = process.env.PORT || 3000;
@@ -36,6 +37,9 @@ app.get('/api/db-health', async (_req, res) => {
     res.status(503).json({ database: 'unreachable' })
   }
 })
+
+// Needs express.json(), so it is mounted after it — unlike the Better Auth handler.
+app.use(signupRouter)
 
 app.get('/api/me', requireAuth, (req, res) => {
   res.json({ user: req.user })

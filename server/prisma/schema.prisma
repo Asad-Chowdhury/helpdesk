@@ -1,8 +1,10 @@
 // Prisma schema — https://pris.ly/d/prisma-schema
 //
-// The User/Session/Account/Verification models below are owned by Better Auth —
-// regenerate them with `bun run auth:generate` rather than editing by hand.
-// Domain models (Workspace, Category, Ticket, ...) are added in a later phase.
+// User/Session/Account/Verification originate from Better Auth.
+//
+// WARNING: `bun run auth:generate` OVERWRITES this whole file. User.memberships and
+// every domain model below are hand-written and would be lost. Only run it when
+// adding a Better Auth plugin, and diff the result before keeping it.
 
 generator client {
   provider = "prisma-client"
@@ -14,15 +16,16 @@ datasource db {
 }
 
 model User {
-  id            String    @id
+  id            String       @id
   name          String
-  email         String    @unique
-  emailVerified Boolean   @default(false)
+  email         String       @unique
+  emailVerified Boolean      @default(false)
   image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
   sessions      Session[]
   accounts      Account[]
+  memberships   Membership[]
 
   @@map("user")
 }
@@ -72,4 +75,62 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+// ─── Domain models (hand-written) ────────────────────────────────────────────
+
+/// Permissions per project-scope.md §Roles. A user's role is per-workspace, which
+/// is why it lives on Membership rather than on User.
+enum Role {
+  ADMIN
+  MANAGER
+  STAFF
+  CLIENT
+}
+
+/// The tenant boundary. Every tenant-scoped table below carries workspaceId.
+model Workspace {
+  id          String       @id @default(cuid())
+  name        String
+  /// URL-safe identifier, reserved for per-workspace subdomains later.
+  slug        String       @unique
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  memberships Membership[]
+  categories  Category[]
+
+  @@map("workspace")
+}
+
+/// Joins a user to a workspace with a role. A single email can hold different
+/// roles in different workspaces — Admin of their own, Client in a vendor's.
+model Membership {
+  id          String    @id @default(cuid())
+  userId      String
+  workspaceId String
+  role        Role
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, workspaceId])
+  @@index([userId])
+  @@index([workspaceId])
+  @@map("membership")
+}
+
+/// Request categories. Seeded with starter defaults on signup; the SLA timeframe
+/// field and form schema arrive in Phase 4.
+model Category {
+  id          String    @id @default(cuid())
+  workspaceId String
+  name        String
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, name])
+  @@index([workspaceId])
+  @@map("category")
 }

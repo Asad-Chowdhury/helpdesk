@@ -1,6 +1,9 @@
 import { useQuery } from '@tanstack/react-query'
+import { Link } from 'react-router'
+import { Navbar } from '@/components/Navbar'
 import { Button } from '@/components/ui/button'
 import { API_BASE_URL } from '@/lib/api'
+import { useSession } from '@/lib/auth-client'
 
 type HealthCheckResponse = {
   status: 'ok'
@@ -15,6 +18,7 @@ async function fetchHealth(): Promise<HealthCheckResponse> {
 }
 
 export function HomePage() {
+  const { data: session } = useSession()
   const { data, isPending, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['health'],
     queryFn: fetchHealth,
@@ -30,24 +34,41 @@ export function HomePage() {
   }
 
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-4">
-      <h1 className="text-2xl font-semibold text-black">Helpdesk</h1>
+    <div className="flex min-h-svh flex-col">
+      <Navbar />
 
-      <p
-        className={
-          isError
-            ? 'text-destructive'
-            : isPending
-              ? 'text-muted-foreground'
-              : 'text-green-600 dark:text-green-500'
-        }
-      >
-        {message}
-      </p>
+      <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col items-center justify-center gap-6 px-6 text-center">
+        <div className="space-y-3">
+          <h1 className="text-4xl font-semibold tracking-tight text-foreground">
+            Request management for creative teams
+          </h1>
+          <p className="mx-auto max-w-md text-muted-foreground">
+            Intake, triage, and track every request in one place — with SLAs your team
+            can actually hit.
+          </p>
+        </div>
 
-      <Button onClick={() => refetch()} disabled={isFetching}>
-        {isFetching ? 'Checking…' : 'Check again'}
-      </Button>
+        {!session && (
+          <div className="flex items-center gap-3">
+            <Button size="lg" render={<Link to="/signup" />}>
+              Create a workspace
+            </Button>
+            <Button size="lg" variant="outline" render={<Link to="/login" />}>
+              Log in
+            </Button>
+          </div>
+        )}
+      </main>
+
+      {/* Dev-only signal that the API is reachable; drop this once there's real UI. */}
+      <footer className="mx-auto flex w-full max-w-5xl items-center justify-center gap-3 px-6 py-4 text-xs">
+        <span className={isError ? 'text-destructive' : 'text-muted-foreground'}>
+          {message}
+        </span>
+        <Button size="xs" variant="ghost" onClick={() => refetch()} disabled={isFetching}>
+          {isFetching ? 'Checking…' : 'Recheck'}
+        </Button>
+      </footer>
     </div>
   )
 }
