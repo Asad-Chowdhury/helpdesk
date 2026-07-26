@@ -1,8 +1,28 @@
 import { Router } from 'express'
+import { rateLimit } from 'express-rate-limit'
 import { auth } from '../lib/auth'
 import { createWorkspaceWithAdmin, EmailTakenError } from '../services/workspace'
 
 export const signupRouter = Router()
+
+/**
+ * Better Auth's limiter only covers /api/auth/*, so this route needs its own.
+ * It is the only public endpoint that creates tenants, which makes unlimited
+ * scripted workspace creation the obvious abuse.
+ *
+ * Generous for humans — one signup, plus room for retries after validation errors —
+ * while making bulk creation impractical. Storage is in-memory, so the limit is per
+ * instance until this moves to Redis.
+ */
+const signupLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 10,
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+  handler: (_req, res) => {
+    res.status(429).json({ error: 'Too many signup attempts. Please try again later.' })
+  },
+})
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD_LENGTH = 8 // matches Better Auth's default
@@ -41,7 +61,7 @@ function validate(body: unknown): { values: Record<string, string>; errors: Fiel
  * Better Auth's own /api/auth/sign-up/email is disabled (see lib/auth.ts) because it
  * produces a user with no workspace and no role.
  */
-signupRouter.post('/api/signup', async (req, res) => {
+signupRouter.post('/api/signup', signupLimiter, async (req, res) => {
   const { values, errors } = validate(req.body)
 
   if (Object.keys(errors).length > 0) {

@@ -3,12 +3,16 @@ import cors from 'cors';
 import { toNodeHandler } from 'better-auth/node';
 import { prisma } from './lib/prisma';
 import { auth } from './lib/auth';
-import { clientOrigins } from './lib/env';
+import { clientOrigins, trustProxy } from './lib/env';
 import { requireAuth } from './middleware/require-auth';
 import { signupRouter } from './routes/signup';
 
 const app = express()
 const port = process.env.PORT || 3000;
+
+// Must match the number of proxies actually in front of this app, or rate limiting
+// keys on the wrong address. See TRUST_PROXY in lib/env.ts.
+app.set('trust proxy', trustProxy)
 
 app.use(
   cors({
