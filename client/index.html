@@ -4,7 +4,23 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>web</title>
+    <title>Helpdesk</title>
+    <script>
+      // Applies the theme before first paint so dark-mode users never see a white
+      // flash. Must stay in sync with readInitialTheme() in src/lib/theme.tsx.
+      ;(function () {
+        try {
+          var stored = localStorage.getItem('helpdesk-theme')
+          var dark =
+            stored === 'dark' ||
+            (!stored && window.matchMedia('(prefers-color-scheme: dark)').matches)
+          if (dark) document.documentElement.classList.add('dark')
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+        } catch (e) {
+          /* private mode or storage disabled — fall back to light */
+        }
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

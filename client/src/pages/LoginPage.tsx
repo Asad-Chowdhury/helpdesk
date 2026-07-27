@@ -1,7 +1,7 @@
 import { Link, useNavigate } from 'react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { AuthShell } from '@/components/AuthShell'
 import { PasswordInput } from '@/components/PasswordInput'
@@ -24,6 +24,7 @@ function messageFor(error: { status?: number; message?: string }): string {
 
 export function LoginPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const {
     register,
@@ -40,7 +41,12 @@ export function LoginPage() {
       if (error) throw new Error(messageFor(error))
       return data
     },
-    onSuccess: () => navigate('/'),
+    onSuccess: async () => {
+      // The cached /api/me from before sign-in is stale — refetch before navigating so
+      // the navbar renders the signed-in state (and any admin links) immediately.
+      await queryClient.invalidateQueries({ queryKey: ['me'] })
+      navigate('/')
+    },
   })
 
   const busy = isSubmitting || mutation.isPending

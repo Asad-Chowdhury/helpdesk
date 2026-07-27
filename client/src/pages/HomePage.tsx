@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { Navbar } from '@/components/Navbar'
 import { Button } from '@/components/ui/button'
 import { API_BASE_URL } from '@/lib/api'
-import { useSession } from '@/lib/auth-client'
+import { fetchMe } from '@/lib/me'
 
 type HealthCheckResponse = {
   status: 'ok'
@@ -18,7 +18,8 @@ async function fetchHealth(): Promise<HealthCheckResponse> {
 }
 
 export function HomePage() {
-  const { data: session } = useSession()
+  // Same query key as the navbar and route guard, so this is a cache read.
+  const { data: me } = useQuery({ queryKey: ['me'], queryFn: fetchMe, retry: false })
   const { data, isPending, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['health'],
     queryFn: fetchHealth,
@@ -48,12 +49,12 @@ export function HomePage() {
           </p>
         </div>
 
-        {!session && (
+        {!me && (
           <div className="flex items-center gap-3">
-            <Button size="lg" render={<Link to="/signup" />}>
+            <Button size="lg" nativeButton={false} render={<Link to="/signup" />}>
               Create a workspace
             </Button>
-            <Button size="lg" variant="outline" render={<Link to="/login" />}>
+            <Button size="lg" variant="outline" nativeButton={false} render={<Link to="/login" />}>
               Log in
             </Button>
           </div>

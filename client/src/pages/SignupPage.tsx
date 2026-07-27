@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { AuthShell } from '@/components/AuthShell'
 import { PasswordInput } from '@/components/PasswordInput'
@@ -14,6 +14,7 @@ import { MIN_PASSWORD_LENGTH, signupSchema, type SignupValues } from '@/lib/sche
 
 export function SignupPage() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
 
   const {
     register,
@@ -27,7 +28,12 @@ export function SignupPage() {
 
   const mutation = useMutation({
     mutationFn: signUp,
-    onSuccess: () => navigate('/'),
+    onSuccess: async () => {
+      // Signup issues a session, so the cached /api/me is stale — refetch before
+      // navigating so the navbar shows the new admin's links immediately.
+      await queryClient.invalidateQueries({ queryKey: ['me'] })
+      navigate('/')
+    },
   })
 
   // Field-level errors from the API (409 duplicate email, 400 validation) are pushed

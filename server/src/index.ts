@@ -1,4 +1,5 @@
 import express from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import cors from 'cors';
 import { toNodeHandler } from 'better-auth/node';
 import { prisma } from './lib/prisma';
@@ -32,7 +33,9 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok' })
 })
 
-app.get('/api/db-health', async (_req, res) => {
+// Authenticated: database reachability is a useful recon signal, and /api/health
+// already covers unauthenticated liveness checks for a load balancer.
+app.get('/api/db-health', requireAuth, async (_req, res) => {
   try {
     await prisma.$queryRaw`SELECT 1`
     res.json({ database: 'connected' })
@@ -45,8 +48,49 @@ app.get('/api/db-health', async (_req, res) => {
 // Needs express.json(), so it is mounted after it — unlike the Better Auth handler.
 app.use(signupRouter)
 
-app.get('/api/me', requireAuth, (req, res) => {
-  res.json({ user: req.user })
+// Memberships carry the role, so this is what the client gates admin-only UI on.
+// The role is read from the database per request — never from anything client-supplied.
+app.get('/api/me', requireAuth, async (req, res) => {
+  const memberships = await prisma.membership.findMany({
+    where: { userId: req.user!.id },
+    select: {
+      role: true,
+      workspace: { select: { id: true, name: true, slug: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+
+  res.json({ user: req.user, memberships })
+})
+
+/**
+ * Must be registered last, and must take four arguments for Express to treat it as an
+ * error handler.
+ *
+ * Express's built-in handler renders the full stack trace into the response whenever
+ * NODE_ENV isn't exactly 'production', which would hand file paths and connection
+ * details to any unauthenticated caller on a bad deploy. This never sends details
+ * regardless of environment — they go to the server log instead.
+ *
+ * Client errors raised upstream (body-parser's 400 on malformed JSON, for instance)
+ * keep their status, since those describe the caller's request rather than our internals.
+ */
+app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  console.error('Unhandled request error:', err)
+
+  // Express must finish a response it already started writing.
+  if (res.headersSent) {
+    next(err)
+    return
+  }
+
+  const status = (err as { status?: number; statusCode?: number })?.status ??
+    (err as { statusCode?: number })?.statusCode
+  const isClientError = typeof status === 'number' && status >= 400 && status < 500
+
+  res
+    .status(isClientError ? status : 500)
+    .json({ error: isClientError ? 'Bad request' : 'Internal server error' })
 })
 
 app.listen(port, () => {

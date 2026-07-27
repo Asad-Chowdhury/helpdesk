@@ -29,12 +29,17 @@ function slugify(input: string): string {
 }
 
 /**
- * Resolves a free slug for `name`. Runs before the transaction, so the unique
- * constraint on workspace.slug remains the real guarantee — this only avoids
- * colliding with slugs that already exist.
+ * Resolves a slug that is free *right now*. This is advisory only — the check and the
+ * insert can't be atomic, so the unique constraint on workspace.slug stays the real
+ * guarantee and the caller retries when it loses the race.
+ *
+ * `randomise` skips straight to a suffixed candidate, used on retry so a concurrent
+ * signup with the same workspace name doesn't just collide again.
  */
-async function resolveSlug(name: string): Promise<string> {
+async function resolveSlug(name: string, randomise = false): Promise<string> {
   const base = slugify(name) || 'workspace'
+
+  if (randomise) return `${base}-${crypto.randomUUID().slice(0, 8)}`
 
   if (!(await prisma.workspace.findUnique({ where: { slug: base } }))) return base
 
@@ -45,6 +50,40 @@ async function resolveSlug(name: string): Promise<string> {
 
   return `${base}-${crypto.randomUUID().slice(0, 8)}`
 }
+
+/**
+ * Prisma's unique-constraint violation (P2002), narrowed to the field that collided.
+ *
+ * Where the field name lives depends on how Prisma reached the database. The classic
+ * engine puts it in `meta.target`; the Prisma 7 driver adapter this project uses
+ * reports it under `meta.driverAdapterError.cause.constraint.fields` instead. Both are
+ * checked, with the raw Postgres message as a last resort, so this keeps working if
+ * the adapter setup changes.
+ */
+function uniqueViolationOn(err: unknown, field: string): boolean {
+  const e = err as {
+    code?: string
+    meta?: {
+      target?: unknown
+      driverAdapterError?: {
+        cause?: { constraint?: { fields?: unknown }; originalMessage?: string }
+      }
+    }
+  }
+  if (e?.code !== 'P2002') return false
+
+  const target = e.meta?.target
+  if (Array.isArray(target) && target.includes(field)) return true
+  if (typeof target === 'string' && target.includes(field)) return true
+
+  const cause = e.meta?.driverAdapterError?.cause
+  const fields = cause?.constraint?.fields
+  if (Array.isArray(fields) && fields.includes(field)) return true
+
+  return typeof cause?.originalMessage === 'string' && cause.originalMessage.includes(field)
+}
+
+const MAX_SLUG_ATTEMPTS = 3
 
 type AuthContext = Awaited<typeof auth.$context>
 
@@ -76,41 +115,71 @@ export async function createWorkspaceWithAdmin(input: CreateWorkspaceInput) {
   const email = input.email.trim().toLowerCase()
   const ctx = await auth.$context
 
+  // Hash BEFORE the existence check, deliberately, so hashing cost is not one of the
+  // things that differs between a taken and a free address. Do not "optimise" this by
+  // skipping the hash when the email is already known.
+  //
+  // Note this does NOT make the two paths take equal time today — a free address goes
+  // on to run the whole provisioning transaction and is measurably slower. That gap is
+  // unavoidable while the responses differ anyway (409 vs 201), and closing it only
+  // matters once the responses are made identical. This ordering is what makes that
+  // future change effective rather than cosmetic.
+  const hashedPassword = await ctx.password.hash(input.password)
+
+  // TODO: this 409 tells an unauthenticated caller whether an address has an account.
+  // The real fix needs email: respond as if signup succeeded and notify the address
+  // instead. Blocked on transactional email (SendGrid) — see implementation-plan.md.
+  // Equalising the work on both paths has to land in the same change.
   if (await prisma.user.findUnique({ where: { email } })) {
     throw new EmailTakenError()
   }
 
-  const hashedPassword = await ctx.password.hash(input.password)
-  const slug = await resolveSlug(input.workspaceName)
   const userId = newId(ctx, 'user')
 
-  return prisma.$transaction(async (tx) => {
-    const workspace = await tx.workspace.create({
-      data: { name: input.workspaceName.trim(), slug },
-    })
+  // The pre-checks above narrow the common cases; these retries handle the rest. Two
+  // concurrent signups can pass the same checks and then race on insert, and without
+  // this the loser would get a 500 for what is really "pick another slug".
+  for (let attempt = 1; ; attempt++) {
+    const slug = await resolveSlug(input.workspaceName, attempt > 1)
 
-    const user = await tx.user.create({
-      data: { id: userId, name: input.name.trim(), email, emailVerified: false },
-    })
+    try {
+      return await prisma.$transaction(async (tx) => {
+        const workspace = await tx.workspace.create({
+          data: { name: input.workspaceName.trim(), slug },
+        })
 
-    await tx.account.create({
-      data: {
-        id: newId(ctx, 'account'),
-        accountId: userId, // for the credential provider Better Auth uses the user id
-        providerId: 'credential',
-        userId,
-        password: hashedPassword,
-      },
-    })
+        const user = await tx.user.create({
+          data: { id: userId, name: input.name.trim(), email, emailVerified: false },
+        })
 
-    await tx.membership.create({
-      data: { userId, workspaceId: workspace.id, role: 'ADMIN' },
-    })
+        await tx.account.create({
+          data: {
+            id: newId(ctx, 'account'),
+            accountId: userId, // for the credential provider Better Auth uses the user id
+            providerId: 'credential',
+            userId,
+            password: hashedPassword,
+          },
+        })
 
-    await tx.category.createMany({
-      data: DEFAULT_CATEGORIES.map((name) => ({ workspaceId: workspace.id, name })),
-    })
+        await tx.membership.create({
+          data: { userId, workspaceId: workspace.id, role: 'ADMIN' },
+        })
 
-    return { workspace, user }
-  })
+        await tx.category.createMany({
+          data: DEFAULT_CATEGORIES.map((name) => ({ workspaceId: workspace.id, name })),
+        })
+
+        return { workspace, user }
+      })
+    } catch (err) {
+      // Lost the race on email — report it the same way the pre-check does, so a
+      // concurrent duplicate signup gets 409 rather than 500.
+      if (uniqueViolationOn(err, 'email')) throw new EmailTakenError()
+
+      if (uniqueViolationOn(err, 'slug') && attempt < MAX_SLUG_ATTEMPTS) continue
+
+      throw err
+    }
+  }
 }

@@ -1,6 +1,8 @@
 import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
+import type { NextFunction, Request, Response } from 'express'
 import { auth } from '../lib/auth'
+import { rateLimitingEnabled } from '../lib/env'
 import { createWorkspaceWithAdmin, EmailTakenError } from '../services/workspace'
 
 export const signupRouter = Router()
@@ -14,7 +16,7 @@ export const signupRouter = Router()
  * while making bulk creation impractical. Storage is in-memory, so the limit is per
  * instance until this moves to Redis.
  */
-const signupLimiter = rateLimit({
+const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   limit: 10,
   standardHeaders: 'draft-8',
@@ -24,8 +26,19 @@ const signupLimiter = rateLimit({
   },
 })
 
+/**
+ * Applied in production only — dev, staging and the E2E suite pass straight through,
+ * since every request there shares one address and ten signups would exhaust the
+ * window without stopping any abuse. See rateLimitingEnabled in ../lib/env.
+ */
+const signupLimiter = (req: Request, res: Response, next: NextFunction) =>
+  rateLimitingEnabled ? limiter(req, res, next) : next()
+
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD_LENGTH = 8 // matches Better Auth's default
+// The client schema enforces this too, but a caller hitting the API directly bypasses
+// that entirely — the server has to police its own bounds.
+const MAX_PASSWORD_LENGTH = 128
 
 type FieldErrors = Record<string, string>
 
@@ -47,11 +60,14 @@ function validate(body: unknown): { values: Record<string, string>; errors: Fiel
   else if (name.length > 100) errors.name = 'Name is too long'
 
   if (!email) errors.email = 'Email is required'
+  else if (email.length > 254) errors.email = 'Email is too long'
   else if (!EMAIL_PATTERN.test(email)) errors.email = 'Enter a valid email address'
 
   if (!password) errors.password = 'Password is required'
   else if (password.length < MIN_PASSWORD_LENGTH)
     errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
+  else if (password.length > MAX_PASSWORD_LENGTH)
+    errors.password = `Password must be at most ${MAX_PASSWORD_LENGTH} characters`
 
   return { values: { workspaceName, name, email, password }, errors }
 }

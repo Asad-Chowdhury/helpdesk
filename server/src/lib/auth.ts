@@ -1,7 +1,7 @@
 import { betterAuth } from 'better-auth'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { prisma } from './prisma'
-import { authSecret, baseURL, clientOrigins } from './env'
+import { authSecret, baseURL, clientOrigins, rateLimitingEnabled } from './env'
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
@@ -9,8 +9,9 @@ export const auth = betterAuth({
   secret: authSecret,
   trustedOrigins: clientOrigins,
   rateLimit: {
-    // Better Auth enables this in production only; turning it on everywhere means
-    // the throttle is exercised in dev instead of running for the first time in prod.
+    // Production only — dev, staging and the E2E suite skip it. See
+    // rateLimitingEnabled in ./env for why that check isn't `=== 'production'`.
+    //
     // Built-in rules already cap /sign-in, /sign-up, /change-password and
     // /change-email at 3 requests per 10s — the window/max below cover other paths.
     // Storage is in-memory, so limits are per-instance until this moves to Redis.
@@ -20,8 +21,9 @@ export const auth = betterAuth({
     // `advanced.ipAddress.trustedProxies` lists the proxy addresses — and with no IP
     // resolvable it falls back to ONE shared bucket per path, so a single attacker
     // could lock every user out of sign-in. Set trustedProxies (or ipAddressHeaders)
-    // to match the real deploy topology once it exists.
-    enabled: true,
+    // to match the real deploy topology once it exists — and since these limits now
+    // run only in production, that misconfiguration would first surface there.
+    enabled: rateLimitingEnabled,
     window: 10,
     max: 100,
   },
