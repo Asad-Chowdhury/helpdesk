@@ -45,7 +45,7 @@ test.describe('User management', () => {
 
       // The only active admin can't demote or deactivate themselves out of the workspace.
       await expect(row.getByRole('combobox', { name: `Role for ${admin.name}` })).toBeDisabled()
-      await expect(row.getByRole('button', { name: 'Deactivate' })).toBeDisabled()
+      await expect(row.getByRole('button', { name: 'Deactivate', exact: true })).toBeDisabled()
     })
 
     test('adds a member and the new row appears', async ({ page, request }) => {
@@ -116,14 +116,14 @@ test.describe('User management', () => {
       const row = page.getByRole('row', { name: member.email })
       await expect(row).toContainText('Active')
 
-      await row.getByRole('button', { name: 'Deactivate' }).click()
+      await row.getByRole('button', { name: 'Deactivate', exact: true }).click()
       await page
         .getByRole('alertdialog')
         .getByRole('button', { name: 'Deactivate' })
         .click()
 
       await expect(row).toContainText('Deactivated')
-      await expect(row.getByRole('button', { name: 'Reactivate' })).toBeVisible()
+      await expect(row.getByRole('button', { name: 'Reactivate', exact: true })).toBeVisible()
     })
 
     test('cuts off a deactivated admin who could previously reach /users', async ({
@@ -151,7 +151,7 @@ test.describe('User management', () => {
       // The owner deactivates them.
       await openUsersPage(page)
       const row = page.getByRole('row', { name: demoted.email })
-      await row.getByRole('button', { name: 'Deactivate' }).click()
+      await row.getByRole('button', { name: 'Deactivate', exact: true }).click()
       await page
         .getByRole('alertdialog')
         .getByRole('button', { name: 'Deactivate' })

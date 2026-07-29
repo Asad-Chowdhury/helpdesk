@@ -45,6 +45,14 @@ export function Navbar() {
 
           {isPending ? null : me ? (
             <>
+              {/* The email is hidden on small screens, so it can't be the only way in —
+                  this link stays visible at every width. */}
+              <Link
+                to="/profile"
+                className="mr-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+              >
+                Profile
+              </Link>
               <span className="hidden text-sm text-muted-foreground sm:inline">
                 {me.user.email}
               </span>

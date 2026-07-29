@@ -7,9 +7,48 @@ export type Membership = {
   workspace: { id: string; name: string; slug: string }
 }
 
+export type MeUser = {
+  id: string
+  name: string
+  email: string
+  /** Always false today — nothing can verify an address until email transport lands. */
+  emailVerified?: boolean
+  createdAt?: string
+}
+
 export type Me = {
-  user: { id: string; name: string; email: string }
+  user: MeUser
   memberships: Membership[]
+}
+
+/** Mirrors the server's `{ error, fields? }` envelope, like SignupError and MembersError. */
+export class MeError extends Error {
+  fields: Record<string, string>
+
+  constructor(message: string, fields: Record<string, string> = {}) {
+    super(message)
+    this.name = 'MeError'
+    this.fields = fields
+  }
+}
+
+export type ProfileInput = { name: string; email: string }
+
+/**
+ * Saves the signed-in user's own name and email. The server takes the target from the
+ * session, so there is no id to pass — this can only ever edit you.
+ *
+ * Returns the same shape as fetchMe, which lets the caller seed the ['me'] cache
+ * directly instead of refetching.
+ */
+export async function updateProfile(input: ProfileInput): Promise<Me> {
+  try {
+    const { data } = await api.patch<Me>('/api/me', input)
+    return data
+  } catch (err) {
+    const { message, fields } = readApiError(err, 'Could not save your profile')
+    throw new MeError(message, fields)
+  }
 }
 
 /** Null when there is no valid session — a 401 is an expected answer here, not an error. */

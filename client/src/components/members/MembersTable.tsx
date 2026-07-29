@@ -7,6 +7,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { MemberDeleteButton } from './MemberDeleteButton'
 import { MemberRoleSelect } from './MemberRoleSelect'
 import { MemberStatusButton } from './MemberStatusButton'
 import type { Member } from '@/lib/members'
@@ -78,12 +79,23 @@ export function MembersTable({ workspaceId, members, currentUserId, onError }: P
                 {dateFormat.format(new Date(member.createdAt))}
               </TableCell>
               <TableCell className="text-right">
-                <MemberStatusButton
-                  workspaceId={workspaceId}
-                  member={member}
-                  disabled={isSelf || isLastActiveAdmin}
-                  onError={onError}
-                />
+                <div className="flex justify-end gap-2">
+                  <MemberStatusButton
+                    workspaceId={workspaceId}
+                    member={member}
+                    disabled={isSelf || isLastActiveAdmin}
+                    onError={onError}
+                  />
+                  {/* Same guards as deactivation: you cannot delete yourself, and the
+                      last active admin has to stay. The server enforces both — this
+                      only keeps the control from offering something it will refuse. */}
+                  <MemberDeleteButton
+                    workspaceId={workspaceId}
+                    member={member}
+                    disabled={isSelf || isLastActiveAdmin}
+                    onError={onError}
+                  />
+                </div>
               </TableCell>
             </TableRow>
           )

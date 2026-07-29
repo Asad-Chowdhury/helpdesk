@@ -1,7 +1,7 @@
-import type { Role } from '../generated/prisma/enums'
-import { auth } from '../lib/auth'
-import { prisma } from '../lib/prisma'
-import { EmailTakenError, newId, uniqueViolationOn } from './workspace'
+import type { Role } from '../../generated/prisma/enums'
+import { auth } from '../../lib/auth'
+import { prisma } from '../../lib/prisma'
+import { EmailTakenError, newId, uniqueViolationOn } from '../../services/workspace'
 
 export class AlreadyMemberError extends Error {
   constructor() {
@@ -31,6 +31,20 @@ export class SelfDeactivationError extends Error {
   }
 }
 
+export class SelfDeletionError extends Error {
+  constructor() {
+    super('You cannot delete your own account')
+    this.name = 'SelfDeletionError'
+  }
+}
+
+export class UserNotFoundError extends Error {
+  constructor() {
+    super('Account not found')
+    this.name = 'UserNotFoundError'
+  }
+}
+
 /**
  * The only shape a member is ever exposed in. Selecting explicitly rather than
  * `include: { user: true }` keeps emailVerified/image — and anything added to User
@@ -52,6 +66,73 @@ export async function listMembers(workspaceId: string) {
     select: MEMBER_SELECT,
     orderBy: [{ createdAt: 'asc' }],
   })
+}
+
+/**
+ * The workspaces the signed-in user can currently act in — what GET /api/me reports and
+ * what the client gates admin-only UI on.
+ *
+ * The `deactivatedAt: null` filter is what makes deactivation take effect. Sessions are
+ * not workspace-scoped, so a deactivated member's cookie stays valid; the workspace just
+ * disappears from here, and the client guard plus admin nav go with it. Do not remove it.
+ */
+export async function listMyMemberships(userId: string) {
+  return prisma.membership.findMany({
+    where: { userId, deactivatedAt: null },
+    select: {
+      role: true,
+      workspace: { select: { id: true, name: true, slug: true } },
+    },
+    orderBy: { createdAt: 'asc' },
+  })
+}
+
+export type UpdateProfileInput = {
+  userId: string
+  name: string
+  email: string
+}
+
+/**
+ * Self-service profile edit. Scoped to `userId` from the session — never a client-
+ * supplied id — so this cannot be turned into "edit anyone".
+ *
+ * Only name and email. Role is per-workspace and belongs to an admin; password goes
+ * through Better Auth's /change-password, which verifies the current one and hashes
+ * with the configured algorithm. Reimplementing either here would be a way to bypass
+ * a check rather than a convenience.
+ */
+export async function updateProfile(input: UpdateProfileInput) {
+  const email = input.email.trim().toLowerCase()
+  const name = input.name.trim()
+
+  const current = await prisma.user.findUnique({
+    where: { id: input.userId },
+    select: { email: true },
+  })
+
+  if (!current) throw new UserNotFoundError()
+
+  try {
+    return await prisma.user.update({
+      where: { id: input.userId },
+      data: {
+        name,
+        email,
+        // A new address has not been shown to belong to them. Nothing enforces this
+        // today (requireEmailVerification is false, and there is no transport to send
+        // a link through), but recording an unproven address as verified would leave
+        // wrong data behind for the moment verification does land.
+        ...(current.email === email ? {} : { emailVerified: false }),
+      },
+      select: { id: true, name: true, email: true, emailVerified: true, createdAt: true },
+    })
+  } catch (err) {
+    // Someone else already holds the address. The unique constraint is the real check —
+    // a pre-read would race.
+    if (uniqueViolationOn(err, 'email')) throw new EmailTakenError()
+    throw err
+  }
 }
 
 /**
@@ -265,5 +346,77 @@ export async function setMemberActive(input: SetMemberActiveInput) {
       data: { deactivatedAt: input.active ? null : new Date() },
       select: MEMBER_SELECT,
     })
+  })
+}
+
+export type DeleteMemberInput = {
+  workspaceId: string
+  membershipId: string
+  actorUserId: string
+}
+
+/** Which of the two things actually happened — the response says so, and the UI reports it. */
+export type DeleteMemberResult = { deleted: 'account' | 'membership' }
+
+/**
+ * Removes someone from a workspace, erasing their account outright when this was the
+ * only workspace they belonged to.
+ *
+ * Unlike deactivation this is irreversible: there is no row left to flip back.
+ *
+ * **Why it is not an unconditional `user.delete`.** One email legitimately holds
+ * memberships in several workspaces (Admin of their own, Client in a vendor's). Wiping
+ * the User row on behalf of one workspace's admin would destroy an account that another
+ * tenant depends on — reaching outside the workspace this request is scoped to, which
+ * is precisely what requireWorkspaceRole exists to prevent. So:
+ *
+ *   - last (or only) membership  → delete the User; Session, Account and Membership all
+ *                                  cascade, leaving nothing behind. A complete wipe.
+ *   - memberships elsewhere      → delete this membership only. They lose access here
+ *                                  and keep the account they use elsewhere.
+ *
+ * Every account this app creates today has exactly one membership, so the first branch
+ * is the normal path; the second is what stops a cross-tenant deletion.
+ *
+ * The same guards as deactivation apply, for the same reasons — and more sharply, since
+ * deleting the last admin would be unrecoverable rather than merely wrong. lockWorkspace
+ * runs first because "count the other admins, then write" is exactly the read-then-write
+ * shape that READ COMMITTED does not make safe on its own.
+ */
+export async function deleteMember(input: DeleteMemberInput): Promise<DeleteMemberResult> {
+  return prisma.$transaction(async (tx) => {
+    await lockWorkspace(tx, input.workspaceId)
+
+    const current = await tx.membership.findFirst({
+      where: { id: input.membershipId, workspaceId: input.workspaceId },
+      select: { id: true, role: true, userId: true, deactivatedAt: true },
+    })
+
+    if (!current) throw new MemberNotFoundError()
+
+    // Deleting yourself would revoke the session mid-request and, for a sole admin,
+    // strand the workspace with no one able to administer it.
+    if (current.userId === input.actorUserId) throw new SelfDeletionError()
+
+    if (current.role === 'ADMIN' && current.deactivatedAt === null) {
+      const others = await otherActiveAdminCount(tx, input.workspaceId, current.id)
+      if (others === 0) throw new LastAdminError()
+    }
+
+    // Counted inside the transaction, behind the workspace lock, so a membership added
+    // concurrently elsewhere cannot make this the wrong branch.
+    const elsewhere = await tx.membership.count({
+      where: { userId: current.userId, id: { not: current.id } },
+    })
+
+    if (elsewhere > 0) {
+      await tx.membership.delete({ where: { id: current.id } })
+      return { deleted: 'membership' }
+    }
+
+    // Cascades to session (signing them out everywhere), account (their credential)
+    // and this membership.
+    await tx.user.delete({ where: { id: current.userId } })
+    return { deleted: 'account' }
   })
 }

@@ -19,6 +19,7 @@ vi.mock('@/lib/members', async (importOriginal) => ({
   fetchMembers: vi.fn(),
   addMember: vi.fn(),
   updateMember: vi.fn(),
+  deleteMember: vi.fn(),
 }))
 
 const WORKSPACE_ID = 'ws_1'
@@ -60,6 +61,7 @@ beforeEach(() => {
   vi.mocked(membersApi.fetchMembers).mockResolvedValue({ members: [adminRow, staffRow] })
   vi.mocked(membersApi.addMember).mockResolvedValue({ member: staffRow })
   vi.mocked(membersApi.updateMember).mockResolvedValue({ member: staffRow })
+  vi.mocked(membersApi.deleteMember).mockResolvedValue({ deleted: 'account' })
 })
 
 describe('UsersPage', () => {
@@ -290,6 +292,95 @@ describe('UsersPage', () => {
       expect(await screen.findByRole('alert')).toHaveTextContent(
         'This workspace must keep at least one active admin',
       )
+    })
+  })
+
+  describe('deleting a member', () => {
+    it('offers delete beside deactivate on every row', async () => {
+      renderWithProviders(<UsersPage />)
+
+      await screen.findByRole('table')
+      const row = rowFor('sam@example.test')
+      expect(within(row).getByRole('button', { name: 'Deactivate' })).toBeInTheDocument()
+      expect(within(row).getByRole('button', { name: 'Delete Sam Staff' })).toBeInTheDocument()
+    })
+
+    it('asks for confirmation and does not delete until it is given', async () => {
+      const { user } = renderWithProviders(<UsersPage />)
+      await screen.findByRole('table')
+
+      await user.click(
+        within(rowFor('sam@example.test')).getByRole('button', { name: 'Delete Sam Staff' }),
+      )
+
+      expect(await screen.findByRole('alertdialog')).toHaveTextContent('Delete Sam Staff?')
+      expect(membersApi.deleteMember).not.toHaveBeenCalled()
+    })
+
+    it('deletes once confirmed', async () => {
+      const { user } = renderWithProviders(<UsersPage />)
+      await screen.findByRole('table')
+
+      await user.click(
+        within(rowFor('sam@example.test')).getByRole('button', { name: 'Delete Sam Staff' }),
+      )
+      const confirm = await screen.findByRole('alertdialog')
+      await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+
+      await waitFor(() =>
+        expect(membersApi.deleteMember).toHaveBeenCalledWith(WORKSPACE_ID, 'm_staff'),
+      )
+    })
+
+    it('leaves the member alone when the confirmation is cancelled', async () => {
+      const { user } = renderWithProviders(<UsersPage />)
+      await screen.findByRole('table')
+
+      await user.click(
+        within(rowFor('sam@example.test')).getByRole('button', { name: 'Delete Sam Staff' }),
+      )
+      const confirm = await screen.findByRole('alertdialog')
+      await user.click(within(confirm).getByRole('button', { name: 'Cancel' }))
+
+      await waitFor(() => expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument())
+      expect(membersApi.deleteMember).not.toHaveBeenCalled()
+    })
+
+    it('reports a refusal from the server in the page-level alert', async () => {
+      vi.mocked(membersApi.deleteMember).mockRejectedValue(
+        new MembersError('This workspace must keep at least one active admin'),
+      )
+
+      const { user } = renderWithProviders(<UsersPage />)
+      await screen.findByRole('table')
+
+      await user.click(
+        within(rowFor('sam@example.test')).getByRole('button', { name: 'Delete Sam Staff' }),
+      )
+      const confirm = await screen.findByRole('alertdialog')
+      await user.click(within(confirm).getByRole('button', { name: 'Delete' }))
+
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        'This workspace must keep at least one active admin',
+      )
+    })
+
+    it('disables delete for your own row and for the last active admin', async () => {
+      // Ada is both here, so add a second admin to separate the two rules: Sam is now
+      // an admin but not the last one, and not the signed-in user.
+      vi.mocked(membersApi.fetchMembers).mockResolvedValue({
+        members: [adminRow, { ...staffRow, role: 'ADMIN' }],
+      })
+
+      renderWithProviders(<UsersPage />)
+      await screen.findByRole('table')
+
+      expect(
+        within(rowFor('ada@example.test')).getByRole('button', { name: 'Delete Ada Admin' }),
+      ).toBeDisabled()
+      expect(
+        within(rowFor('sam@example.test')).getByRole('button', { name: 'Delete Sam Staff' }),
+      ).toBeEnabled()
     })
   })
 

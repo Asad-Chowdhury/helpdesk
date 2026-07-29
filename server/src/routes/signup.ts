@@ -1,8 +1,10 @@
 import { Router } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import type { NextFunction, Request, Response } from 'express'
+import { z } from 'zod'
 import { auth } from '../lib/auth'
 import { rateLimitingEnabled } from '../lib/env'
+import { emailField, parseBody, validationErrorBody } from '../lib/validation'
 import { createWorkspaceWithAdmin, EmailTakenError } from '../services/workspace'
 
 export const signupRouter = Router()
@@ -34,43 +36,41 @@ const limiter = rateLimit({
 const signupLimiter = (req: Request, res: Response, next: NextFunction) =>
   rateLimitingEnabled ? limiter(req, res, next) : next()
 
-const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD_LENGTH = 8 // matches Better Auth's default
 // The client schema enforces this too, but a caller hitting the API directly bypasses
 // that entirely — the server has to police its own bounds.
 const MAX_PASSWORD_LENGTH = 128
 
-type FieldErrors = Record<string, string>
-
-function validate(body: unknown): { values: Record<string, string>; errors: FieldErrors } {
-  const errors: FieldErrors = {}
-  const b = (body ?? {}) as Record<string, unknown>
-
-  const read = (key: string) => (typeof b[key] === 'string' ? (b[key] as string).trim() : '')
-
-  const workspaceName = read('workspaceName')
-  const name = read('name')
-  const email = read('email')
-  const password = typeof b.password === 'string' ? b.password : ''
-
-  if (!workspaceName) errors.workspaceName = 'Workspace name is required'
-  else if (workspaceName.length > 100) errors.workspaceName = 'Workspace name is too long'
-
-  if (!name) errors.name = 'Your name is required'
-  else if (name.length > 100) errors.name = 'Name is too long'
-
-  if (!email) errors.email = 'Email is required'
-  else if (email.length > 254) errors.email = 'Email is too long'
-  else if (!EMAIL_PATTERN.test(email)) errors.email = 'Enter a valid email address'
-
-  if (!password) errors.password = 'Password is required'
-  else if (password.length < MIN_PASSWORD_LENGTH)
-    errors.password = `Password must be at least ${MIN_PASSWORD_LENGTH} characters`
-  else if (password.length > MAX_PASSWORD_LENGTH)
-    errors.password = `Password must be at most ${MAX_PASSWORD_LENGTH} characters`
-
-  return { values: { workspaceName, name, email, password }, errors }
-}
+/**
+ * Mirrored client-side in `client/src/lib/schemas.ts`. `name` is spelled out rather
+ * than reusing `personNameField` because this form asks for the signer-up's own name
+ * ("Your name is required"), and zod checks accumulate — appending a second `min(1)`
+ * would report the shared field's message first rather than replacing it.
+ *
+ * The password is deliberately not trimmed: leading or trailing whitespace is part of
+ * the credential, and stripping it here would not match what Better Auth later hashes.
+ */
+const signupSchema = z.object({
+  workspaceName: z
+    .string({ error: 'Workspace name is required' })
+    .trim()
+    .min(1, { error: 'Workspace name is required' })
+    .max(100, { error: 'Workspace name is too long' }),
+  name: z
+    .string({ error: 'Your name is required' })
+    .trim()
+    .min(1, { error: 'Your name is required' })
+    .max(100, { error: 'Name is too long' }),
+  email: emailField,
+  password: z
+    .string({ error: 'Password is required' })
+    .min(MIN_PASSWORD_LENGTH, {
+      error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+    })
+    .max(MAX_PASSWORD_LENGTH, {
+      error: `Password must be at most ${MAX_PASSWORD_LENGTH} characters`,
+    }),
+})
 
 /**
  * Public tenant registration — the only way an account is created from outside.
@@ -78,21 +78,18 @@ function validate(body: unknown): { values: Record<string, string>; errors: Fiel
  * produces a user with no workspace and no role.
  */
 signupRouter.post('/api/signup', signupLimiter, async (req, res) => {
-  const { values, errors } = validate(req.body)
+  const parsed = parseBody(signupSchema, req.body)
 
-  if (Object.keys(errors).length > 0) {
-    res.status(400).json({ error: 'Validation failed', fields: errors })
+  if (!parsed.success) {
+    res.status(400).json(validationErrorBody(parsed.error))
     return
   }
 
+  const values = parsed.data
+
   let created: Awaited<ReturnType<typeof createWorkspaceWithAdmin>>
   try {
-    created = await createWorkspaceWithAdmin({
-      workspaceName: values.workspaceName!,
-      name: values.name!,
-      email: values.email!,
-      password: values.password!,
-    })
+    created = await createWorkspaceWithAdmin(values)
   } catch (err) {
     if (err instanceof EmailTakenError) {
       res.status(409).json({ error: err.message, fields: { email: err.message } })
@@ -108,7 +105,7 @@ signupRouter.post('/api/signup', signupLimiter, async (req, res) => {
   let sessionIssued = false
   try {
     const signIn = await auth.api.signInEmail({
-      body: { email: values.email!, password: values.password! },
+      body: { email: values.email, password: values.password },
       asResponse: true,
     })
     if (signIn.ok) {

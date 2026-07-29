@@ -59,3 +59,47 @@ export const addMemberSchema = z.object({
 })
 
 export type AddMemberValues = z.infer<typeof addMemberSchema>
+
+/**
+ * Profile details. Mirrors `updateProfileSchema` in
+ * `server/src/modules/users/users.schemas.ts` — same fields, same messages.
+ */
+export const profileSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, { error: 'Your name is required' })
+    .max(100, { error: 'Name is too long' }),
+  email: z
+    .email({ error: 'Enter a valid email address' })
+    .max(254, { error: 'Email is too long' }),
+})
+
+export type ProfileValues = z.infer<typeof profileSchema>
+
+/**
+ * Password change. The current password is required because Better Auth's
+ * /change-password verifies it server-side — asking for it here is not the check, just
+ * a way to fail before the round trip.
+ *
+ * `confirmPassword` exists only on this side: a typo in a new password is unrecoverable
+ * without email reset, which does not exist yet. The refine is attached to the confirm
+ * field via `path` so the message lands on the input the user must fix.
+ */
+export const changePasswordSchema = z
+  .object({
+    currentPassword: z.string().min(1, { error: 'Enter your current password' }),
+    newPassword: z
+      .string()
+      .min(MIN_PASSWORD_LENGTH, {
+        error: `Password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+      })
+      .max(128, { error: 'Password is too long' }),
+    confirmPassword: z.string().min(1, { error: 'Confirm your new password' }),
+  })
+  .refine((values) => values.newPassword === values.confirmPassword, {
+    error: 'Passwords do not match',
+    path: ['confirmPassword'],
+  })
+
+export type ChangePasswordValues = z.infer<typeof changePasswordSchema>

@@ -64,3 +64,18 @@ export function updateMember(
 ): Promise<{ member: Member }> {
   return request(() => api.patch(`/api/workspaces/${workspaceId}/users/${membershipId}`, patch))
 }
+
+/**
+ * Irreversible, unlike deactivation.
+ *
+ * `deleted` says what the server actually did: `'account'` when this workspace was the
+ * person's only one and their account was erased outright, `'membership'` when they
+ * belong to other workspaces and only lost access to this one. The server decides —
+ * removing an account another tenant still uses is not this workspace's to do.
+ */
+export function deleteMember(
+  workspaceId: string,
+  membershipId: string,
+): Promise<{ deleted: 'account' | 'membership' }> {
+  return request(() => api.delete(`/api/workspaces/${workspaceId}/users/${membershipId}`))
+}
