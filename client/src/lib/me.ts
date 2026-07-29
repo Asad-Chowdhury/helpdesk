@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './api'
+import { api, readApiError } from './api'
 
 export type Role = 'ADMIN' | 'MANAGER' | 'STAFF' | 'CLIENT'
 
@@ -14,12 +14,14 @@ export type Me = {
 
 /** Null when there is no valid session — a 401 is an expected answer here, not an error. */
 export async function fetchMe(): Promise<Me | null> {
-  const res = await fetch(`${API_BASE_URL}/api/me`, { credentials: 'include' })
-
-  if (res.status === 401) return null
-  if (!res.ok) throw new Error(`Could not load your account (${res.status})`)
-
-  return res.json()
+  try {
+    const { data } = await api.get<Me>('/api/me')
+    return data
+  } catch (err) {
+    const { message, status } = readApiError(err, 'Could not load your account')
+    if (status === 401) return null
+    throw new Error(message)
+  }
 }
 
 /**

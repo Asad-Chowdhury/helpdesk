@@ -7,6 +7,7 @@ import { auth } from './lib/auth';
 import { clientOrigins, trustProxy } from './lib/env';
 import { requireAuth } from './middleware/require-auth';
 import { signupRouter } from './routes/signup';
+import { workspaceMembersRouter } from './routes/workspace-members';
 
 const app = express()
 const port = process.env.PORT || 3000;
@@ -47,12 +48,17 @@ app.get('/api/db-health', requireAuth, async (_req, res) => {
 
 // Needs express.json(), so it is mounted after it — unlike the Better Auth handler.
 app.use(signupRouter)
+app.use(workspaceMembersRouter)
 
 // Memberships carry the role, so this is what the client gates admin-only UI on.
 // The role is read from the database per request — never from anything client-supplied.
+//
+// Deactivated memberships are omitted, which is what makes deactivation take effect:
+// the member's session cookie stays valid (sessions are not workspace-scoped), but the
+// workspace disappears from their /api/me and the admin UI gated on it goes with it.
 app.get('/api/me', requireAuth, async (req, res) => {
   const memberships = await prisma.membership.findMany({
-    where: { userId: req.user!.id },
+    where: { userId: req.user!.id, deactivatedAt: null },
     select: {
       role: true,
       workspace: { select: { id: true, name: true, slug: true } },

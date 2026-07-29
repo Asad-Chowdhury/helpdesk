@@ -60,7 +60,7 @@ async function resolveSlug(name: string, randomise = false): Promise<string> {
  * checked, with the raw Postgres message as a last resort, so this keeps working if
  * the adapter setup changes.
  */
-function uniqueViolationOn(err: unknown, field: string): boolean {
+export function uniqueViolationOn(err: unknown, field: string): boolean {
   const e = err as {
     code?: string
     meta?: {
@@ -85,14 +85,14 @@ function uniqueViolationOn(err: unknown, field: string): boolean {
 
 const MAX_SLUG_ATTEMPTS = 3
 
-type AuthContext = Awaited<typeof auth.$context>
+export type AuthContext = Awaited<typeof auth.$context>
 
 /**
  * Better Auth returns `false` from generateId when it is configured to let the
  * database assign ids. Neither user.id nor account.id has a Prisma default, so
  * produce one ourselves in that case.
  */
-function newId(ctx: AuthContext, model: 'user' | 'account'): string {
+export function newId(ctx: AuthContext, model: 'user' | 'account'): string {
   const id = ctx.generateId({ model })
   return typeof id === 'string' ? id : crypto.randomUUID()
 }

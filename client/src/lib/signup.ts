@@ -1,4 +1,4 @@
-import { API_BASE_URL } from './api'
+import { api, readApiError } from './api'
 import type { SignupValues } from './schemas'
 
 export type SignupResponse = {
@@ -19,21 +19,12 @@ export class SignupError extends Error {
 }
 
 export async function signUp(input: SignupValues): Promise<SignupResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/signup`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    credentials: 'include', // the response sets the session cookie
-    body: JSON.stringify(input),
-  })
-
-  const body = await res.json().catch(() => null)
-
-  if (!res.ok) {
-    throw new SignupError(
-      body?.error ?? `Signup failed (${res.status})`,
-      body?.fields ?? {},
-    )
+  try {
+    // The response sets the session cookie; `api` sends credentials on every request.
+    const { data } = await api.post<SignupResponse>('/api/signup', input)
+    return data
+  } catch (err) {
+    const { message, fields } = readApiError(err, 'Signup failed')
+    throw new SignupError(message, fields)
   }
-
-  return body as SignupResponse
 }

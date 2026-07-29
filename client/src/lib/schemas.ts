@@ -41,3 +41,21 @@ export const loginSchema = z.object({
 })
 
 export type LoginValues = z.infer<typeof loginSchema>
+
+/**
+ * Mirrors server/src/routes/workspace-members.ts. No password field — the server issues
+ * a temporary one, because there is no transactional email to send an invite through yet.
+ */
+export const addMemberSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, { error: 'Name is required' })
+    .max(100, { error: 'Name is too long' }),
+  email: z
+    .email({ error: 'Enter a valid email address' })
+    .max(254, { error: 'Email is too long' }),
+  role: z.enum(['ADMIN', 'MANAGER', 'STAFF', 'CLIENT'], { error: 'Choose a role' }),
+})
+
+export type AddMemberValues = z.infer<typeof addMemberSchema>

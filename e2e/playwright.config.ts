@@ -1,15 +1,11 @@
 import { defineConfig, devices } from '@playwright/test'
 import 'dotenv/config'
 import { testDatabaseUrl } from './support/test-db'
+import { API_PORT, API_URL, WEB_PORT, WEB_URL } from './support/urls'
 
 // Validates the *_test suffix at config load, so a misconfigured URL fails before any
 // server starts rather than after something has already been truncated.
 const DATABASE_URL = testDatabaseUrl()
-
-const API_PORT = Number(process.env.E2E_API_PORT ?? 3001)
-const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 5174)
-const API_URL = `http://localhost:${API_PORT}`
-const WEB_URL = `http://localhost:${WEB_PORT}`
 
 export default defineConfig({
   testDir: './tests',

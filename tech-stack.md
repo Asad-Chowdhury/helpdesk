@@ -4,7 +4,7 @@
 
 - **React** + **TypeScript**, bundled with **Vite**
 - **React Router** for client-side routing
-- **TanStack Query** for calling the Express API (caching, loading/error states, mutations)
+- **TanStack Query** for calling the Express API (caching, loading/error states, mutations), over **axios** as the HTTP client — one configured instance carries `withCredentials` for the session cookie. No bare `fetch`.
 - **Tailwind CSS** + **ShadCN/UI**
 - Pure client-side SPA — no server of its own, just a static build
 

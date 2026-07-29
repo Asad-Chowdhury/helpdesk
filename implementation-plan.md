@@ -45,10 +45,10 @@ Note: two MVP features didn't have an obvious slot in this 8-phase structure —
 
 **Admin CRUD for agents, role-based access**
 
-- [ ] Admin CRUD for agents (Manager/Staff): invite, edit, deactivate
+- [x] Admin CRUD for agents (Manager/Staff): add, edit role, deactivate/reactivate — `/users` page + `/api/workspaces/:workspaceId/users`. **"Invite" is not an invite yet:** with no transactional email, adding a member creates the account immediately and returns a one-time temporary password for the Admin to pass on. Swap in a token + email once SendGrid lands (Phase 6).
 - [ ] Enforce the plan's team-member seat cap on invite — resolve the block-vs-upgrade-prompt open question first
 - [ ] Client invitations: Admin invites a Client, default "watcher" permission, optional per-client "raise ticket" grant
-- [ ] Role-based access control middleware: per-route/action permission checks for Admin/Manager/Staff/Client
+- [x] Role-based access control middleware: `requireWorkspaceRole(...roles)` covers per-route checks on workspace-scoped routes. Per-*action* checks (the exceptions below) still to come.
 - [ ] Enforce the specific permission exceptions: priority override is Admin-only; category/SLA edits are Admin/Manager; ticket status transitions are Staff/Manager
 - [ ] Workspace settings page (name, branding basics)
 - [ ] Stripe subscription tied to the workspace: flat tier gated on team-member count, upgrade/downgrade flow, Stripe customer portal

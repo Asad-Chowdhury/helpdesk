@@ -109,6 +109,10 @@ model Membership {
   userId      String
   workspaceId String
   role        Role
+  /// Null means active. Deactivation is per-workspace, not per-user: the same person
+  /// can stay active elsewhere. Kept as a nullable timestamp rather than a boolean so
+  /// the row survives — reactivating is a flag flip, which keeps @@unique intact.
+  deactivatedAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)

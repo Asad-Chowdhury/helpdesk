@@ -1,7 +1,7 @@
 import { Link } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ThemeToggle } from '@/components/ThemeToggle'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { authClient } from '@/lib/auth-client'
 import { fetchMe, hasRole } from '@/lib/me'
 
@@ -60,10 +60,15 @@ export function Navbar() {
             </>
           ) : (
             <>
-              <Button variant="ghost" nativeButton={false} render={<Link to="/login" />}>
+              {/* Real <a> elements, not Buttons. Base UI's Button forces role="button"
+                  on whatever it renders, which would announce these as buttons even
+                  though they navigate. buttonVariants keeps the styling. */}
+              <Link to="/login" className={buttonVariants({ variant: 'ghost' })}>
                 Log in
-              </Button>
-              <Button nativeButton={false} render={<Link to="/signup" />}>Sign up</Button>
+              </Link>
+              <Link to="/signup" className={buttonVariants()}>
+                Sign up
+              </Link>
             </>
           )}
         </div>

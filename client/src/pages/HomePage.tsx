@@ -1,8 +1,8 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router'
 import { Navbar } from '@/components/Navbar'
-import { Button } from '@/components/ui/button'
-import { API_BASE_URL } from '@/lib/api'
+import { Button, buttonVariants } from '@/components/ui/button'
+import { api, readApiError } from '@/lib/api'
 import { fetchMe } from '@/lib/me'
 
 type HealthCheckResponse = {
@@ -10,11 +10,12 @@ type HealthCheckResponse = {
 }
 
 async function fetchHealth(): Promise<HealthCheckResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/health`, {
-    credentials: 'include', // send/receive cookies for cross-origin session auth
-  })
-  if (!res.ok) throw new Error(`API request failed (${res.status})`)
-  return res.json()
+  try {
+    const { data } = await api.get<HealthCheckResponse>('/api/health')
+    return data
+  } catch (err) {
+    throw new Error(readApiError(err, 'API request failed').message)
+  }
 }
 
 export function HomePage() {
@@ -51,12 +52,12 @@ export function HomePage() {
 
         {!me && (
           <div className="flex items-center gap-3">
-            <Button size="lg" nativeButton={false} render={<Link to="/signup" />}>
+            <Link to="/signup" className={buttonVariants({ size: 'lg' })}>
               Create a workspace
-            </Button>
-            <Button size="lg" variant="outline" nativeButton={false} render={<Link to="/login" />}>
+            </Link>
+            <Link to="/login" className={buttonVariants({ size: 'lg', variant: 'outline' })}>
               Log in
-            </Button>
+            </Link>
           </div>
         )}
       </main>

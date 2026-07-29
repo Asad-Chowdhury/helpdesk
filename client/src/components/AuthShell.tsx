@@ -30,7 +30,13 @@ export function AuthShell({ title, description, children, footer }: AuthShellPro
 
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-xl">{title}</CardTitle>
+          {/* shadcn's CardTitle renders a plain <div>, which left these pages with no
+              heading at all — bad for screen readers, and it made the title
+              unreachable by role. The nested h1 restores the semantics while keeping
+              the card's own layout slot. */}
+          <CardTitle>
+            <h1 className="text-xl">{title}</h1>
+          </CardTitle>
           <CardDescription>{description}</CardDescription>
         </CardHeader>
         <CardContent>{children}</CardContent>
