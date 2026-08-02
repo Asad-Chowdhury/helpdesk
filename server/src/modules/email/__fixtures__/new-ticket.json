@@ -1,0 +1,12 @@
+{
+  "headers": "Received: by mx.sendgrid.net with SMTP id abc\r\nMessage-ID: <CAF1e2new@mail.gmail.com>\r\nDate: Sat, 1 Aug 2026 10:00:00 +0000\r\nSubject: Launch deck needs the new logo\r\nFrom: Sam Staff <sam@acme.test>\r\nTo: acme@tickets.example.com\r\nMIME-Version: 1.0",
+  "dkim": "{@acme.test : pass}",
+  "to": "acme@tickets.example.com",
+  "from": "Sam Staff <sam@acme.test>",
+  "subject": "Launch deck needs the new logo",
+  "text": "The deck still uses the old mark on slides 3 and 7.\r\n\r\nCan someone swap them before Friday?\r\n",
+  "envelope": "{\"to\":[\"acme@tickets.example.com\"],\"from\":\"sam@acme.test\"}",
+  "charsets": "{\"to\":\"UTF-8\",\"from\":\"UTF-8\",\"subject\":\"UTF-8\",\"text\":\"UTF-8\"}",
+  "SPF": "pass",
+  "spam_score": "0.4"
+}

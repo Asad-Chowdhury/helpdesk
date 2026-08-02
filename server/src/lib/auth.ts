@@ -1,7 +1,9 @@
 import { betterAuth } from 'better-auth'
+import { APIError } from 'better-auth/api'
 import { prismaAdapter } from 'better-auth/adapters/prisma'
 import { prisma } from './prisma'
 import { authSecret, baseURL, clientOrigins, rateLimitingEnabled } from './env'
+import { hasWorkspaceAccess } from './workspace-access'
 
 export const auth = betterAuth({
   database: prismaAdapter(prisma, { provider: 'postgresql' }),
@@ -46,5 +48,39 @@ export const auth = betterAuth({
     // cookieCache is intentionally left disabled (the default): every request
     // validates against the `session` row rather than trusting a signed cookie
     // payload. That is what makes these database sessions.
+  },
+  databaseHooks: {
+    session: {
+      create: {
+        /**
+         * **No active membership anywhere means no session.**
+         *
+         * Better Auth authenticates the *account* — it knows nothing about Membership or
+         * `deactivatedAt`. Without this, a deactivated person still signed in successfully
+         * and landed in the app with `memberships: []`: signed in, with access to nothing.
+         *
+         * Hooked at session *creation* rather than on the sign-in endpoint, so it covers
+         * every path that mints a session — email sign-in today, and the magic link the
+         * Client role is getting later — instead of only the one that exists now.
+         *
+         * This runs *after* the password has been verified, so only the genuine account
+         * owner ever sees the message. That is why it names the real reason instead of
+         * reusing the deliberately-vague "Invalid email or password": being told your
+         * access was removed is useful, and it reveals nothing to someone who could not
+         * authenticate in the first place.
+         *
+         * Signup is unaffected: it issues its session through `auth.api.signInEmail`, and
+         * `createWorkspaceWithAdmin` has already committed the ADMIN membership by then.
+         */
+        before: async (session) => {
+          if (await hasWorkspaceAccess(session.userId)) return
+
+          throw new APIError('FORBIDDEN', {
+            message:
+              'Your access to this workspace has been removed. Contact an admin if you think this is a mistake.',
+          })
+        },
+      },
+    },
   },
 })

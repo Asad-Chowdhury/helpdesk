@@ -71,3 +71,19 @@ export async function fetchMe(): Promise<Me | null> {
 export function hasRole(me: Me | null | undefined, role: Role): boolean {
   return Boolean(me?.memberships.some((m) => m.role === role))
 }
+
+/**
+ * The workspace the ticket pages act in, and the role held *there*.
+ *
+ * There is still no active-workspace concept, so this is the first membership — the same
+ * limitation `hasRole` carries, made explicit in one place. It returns the membership
+ * rather than just the workspace because every ticket control needs the pair: which
+ * workspace to query, and which role the caller holds in it. Reading the role from
+ * `hasRole` instead would be wrong here, since that answers "in any workspace".
+ *
+ * When a user can meaningfully belong to several, this becomes a selection stored in the
+ * URL or in context, and the callers do not change shape.
+ */
+export function primaryMembership(me: Me | null | undefined): Membership | undefined {
+  return me?.memberships[0]
+}

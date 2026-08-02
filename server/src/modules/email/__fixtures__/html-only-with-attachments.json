@@ -1,0 +1,13 @@
+{
+  "headers": "Message-ID: <html-only-1@mail.example>\r\nSubject: Brief attached\r\nFrom: \"Mia Manager\" <mia@acme.test>\r\nTo: acme@tickets.example.com",
+  "dkim": "{@acme.test : pass}",
+  "to": "acme@tickets.example.com",
+  "from": "\"Mia Manager\" <mia@acme.test>",
+  "subject": "Brief attached",
+  "html": "<div><p>Brief is attached.</p><p>Deadline is <b>Friday</b>.</p></div>",
+  "envelope": "{\"to\":[\"acme@tickets.example.com\"],\"from\":\"mia@acme.test\"}",
+  "attachments": "2",
+  "attachment-info": "{\"attachment1\":{\"filename\":\"brief.pdf\",\"type\":\"application/pdf\"},\"attachment2\":{\"filename\":\"logo.png\",\"type\":\"image/png\"}}",
+  "SPF": "pass",
+  "spam_score": "0.2"
+}

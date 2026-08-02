@@ -1,0 +1,11 @@
+{
+  "headers": "Subject: Out of office\r\nFrom: Away Person <away@acme.test>\r\nTo: acme@tickets.example.com\r\nAuto-Submitted: auto-replied\r\nPrecedence: bulk",
+  "dkim": "none",
+  "to": "acme@tickets.example.com",
+  "from": "Away Person <away@acme.test>",
+  "subject": "Out of office",
+  "text": "I am away until Monday.",
+  "envelope": "{\"to\":[\"acme@tickets.example.com\"],\"from\":\"away@acme.test\"}",
+  "SPF": "softfail",
+  "spam_score": "1.2"
+}

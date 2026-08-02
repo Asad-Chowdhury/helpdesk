@@ -27,6 +27,14 @@ model User {
   accounts      Account[]
   memberships   Membership[]
 
+  // Deleting a user must NOT take their tickets with it — see the note above Ticket.
+  // These are all SetNull relations, so they are back-references to rows that outlive
+  // the account, not children of it.
+  requestedTickets Ticket[]        @relation("TicketRequester")
+  assignedTickets  Ticket[]        @relation("TicketAssignee")
+  ticketComments   TicketComment[]
+  ticketEvents     TicketEvent[]
+
   @@map("user")
 }
 
@@ -94,10 +102,25 @@ model Workspace {
   name        String
   /// URL-safe identifier, reserved for per-workspace subdomains later.
   slug        String       @unique
+
+  /// Whether mail from an address with no active membership here may raise a ticket.
+  ///
+  /// Off by default: an inbound address is public, so an open door is a spam and
+  /// impersonation surface. While off, unknown senders are logged as DROPPED on
+  /// InboundEmail and nothing is created — which is also the data a "pending senders"
+  /// screen would be built from.
+  ///
+  /// This exists as a column rather than a constant because the safe default is very
+  /// restrictive today: there is no client-invitation flow yet, so almost nobody outside
+  /// the team *has* a membership. Turning intake on should be a settings change, not a
+  /// migration.
+  allowUnknownSenders Boolean @default(false)
+
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   memberships Membership[]
   categories  Category[]
+  tickets     Ticket[]
 
   @@map("workspace")
 }
@@ -133,8 +156,313 @@ model Category {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tickets     Ticket[]
 
   @@unique([workspaceId, name])
   @@index([workspaceId])
   @@map("category")
+}
+
+/// How a ticket entered the system. `EMAIL` tickets have a requester who may never open
+/// the app, so notifications are the only channel that reaches them.
+enum TicketSource {
+  WEB
+  EMAIL
+}
+
+/// Fixed platform-wide in MVP per project-scope.md §4 — not renameable or extendable by
+/// anyone, including Admin. Transitions are recorded as TicketEvent rows.
+enum TicketStatus {
+  REQUESTED
+  OPEN
+  RESOLVED
+  CLOSED
+}
+
+/// Five levels per project-scope.md §4. Set to NORMAL at intake for now: the AI
+/// categorisation that is meant to choose the initial value is Phase 5, and SLA-driven
+/// auto-escalation needs BullMQ. Manual override is Admin-only, enforced in the policy
+/// module rather than here.
+enum TicketPriority {
+  LOW
+  NORMAL
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+/// A request. The unit of work the whole product is about.
+///
+/// ── Why every person on a ticket is stored twice ─────────────────────────────
+///
+/// A ticket is the workspace's operational record. It has to stay readable after the
+/// people named on it are gone, so each person is recorded two ways:
+///
+///   1. A NULLABLE foreign key with `onDelete: SetNull` — deleting the account clears
+///      the pointer and leaves this row completely untouched. Never `Cascade` here.
+///      Session/Account/Membership cascade from User because they *are* the account;
+///      a ticket is not, and cascading would let one admin's "delete this person" erase
+///      work other people are actively doing.
+///   2. A denormalised name/email SNAPSHOT, written at the time of the action. The FK
+///      going null loses the identity entirely, which would turn a ticket's requester
+///      into a blank — so the snapshot is what makes the record durable, not the FK.
+///
+/// Reads prefer the live relation when it is still there (so a rename in /profile shows
+/// through) and fall back to the snapshot when it is null. See `personFrom()` in
+/// tickets.service.ts — that resolution lives in exactly one place on purpose.
+///
+/// The FK is still worth keeping for what the snapshot cannot do: filtering. "Assigned
+/// to me" and the assignee filter query `assigneeId`, which means they correctly stop
+/// matching a deleted account instead of matching a stale string.
+model Ticket {
+  id          String @id @default(cuid())
+  workspaceId String
+
+  /// Per-workspace human-facing number (#1, #2, …), so one tenant's ids never hint at
+  /// another's volume. Allocated under a workspace row lock — see createTicket.
+  number Int
+
+  subject     String
+  description String
+
+  status   TicketStatus   @default(REQUESTED)
+  priority TicketPriority @default(NORMAL)
+
+  /// Which channel raised it. Staff need to know whether replying in the app reaches the
+  /// requester or whether the conversation actually lives in someone's inbox.
+  source TicketSource @default(WEB)
+
+  /// Threading key, embedded in the Reply-To of every notification we send about this
+  /// ticket (`reply+<token>@MAIL_DOMAIN`). An inbound reply to that address is matched
+  /// back to this row — see modules/email/inbound.routing.ts.
+  ///
+  /// Non-null on *every* ticket, including web-raised ones: notifications need a
+  /// threadable Reply-To regardless of how the ticket started, and a nullable column would
+  /// force a "mint one now" branch into every send site.
+  ///
+  /// **Treat this as a bearer credential.** Anyone holding a forwarded copy of the address
+  /// can attempt to append to the thread — the sender must still pass the membership and
+  /// visibility checks, but the token must never appear in a URL, a log line, or any
+  /// client-facing API response.
+  replyToken String @unique
+
+  /// SetNull rather than Cascade: deleting a category must not delete its history.
+  /// Nullable also covers a ticket raised before categories are chosen.
+  categoryId String?
+
+  // The person who raised it. Snapshot columns are required — a ticket always has a
+  // requester at creation, even if the account is later erased.
+  requesterId    String?
+  requesterName  String
+  requesterEmail String
+
+  // The person working it. All three are nullable: unassigned is a normal state.
+  assigneeId    String?
+  assigneeName  String?
+  assigneeEmail String?
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  resolvedAt DateTime?
+  closedAt   DateTime?
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  category  Category? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  requester User?     @relation("TicketRequester", fields: [requesterId], references: [id], onDelete: SetNull)
+  assignee  User?     @relation("TicketAssignee", fields: [assigneeId], references: [id], onDelete: SetNull)
+
+  comments TicketComment[]
+  events   TicketEvent[]
+
+  @@unique([workspaceId, number])
+  @@index([workspaceId, status])
+  @@index([workspaceId, assigneeId])
+  @@index([workspaceId, requesterId])
+  @@index([workspaceId, createdAt])
+  @@map("ticket")
+}
+
+/// A comment on the thread, or an internal note when `internal` is true.
+///
+/// Both live in one table because they are the same thing with a different audience —
+/// keeping them apart would mean two queries and two orderings to render one thread.
+/// `internal` is never exposed to a CLIENT: the service filters it out of the query
+/// rather than the response, so the rows are never loaded for them at all.
+model TicketComment {
+  id       String @id @default(cuid())
+  ticketId String
+
+  /// Denormalised from the ticket. Redundant today, but it means the workspaceId-scoping
+  /// Prisma extension (see tech-stack.md) can scope this table directly instead of
+  /// having to join through Ticket on every read.
+  workspaceId String
+
+  body     String
+  internal Boolean @default(false)
+
+  // Snapshot + nullable FK, same rule as Ticket. A comment must keep its attribution
+  // after the author's account is gone, or the thread stops making sense.
+  authorId    String?
+  authorName  String
+  authorEmail String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author User?  @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@index([workspaceId])
+  @@map("ticket_comment")
+}
+
+enum TicketEventType {
+  CREATED
+  STATUS_CHANGED
+  PRIORITY_CHANGED
+  ASSIGNED
+  UNASSIGNED
+  CATEGORY_CHANGED
+}
+
+/// Append-only activity history (project-scope.md §3). Never updated, never deleted
+/// except with its ticket — an audit trail that can be edited is not one.
+///
+/// `fromValue`/`toValue` are plain strings rather than typed columns because one table
+/// records changes to enums, to an assignee name and to a category name. The event type
+/// says how to read them.
+model TicketEvent {
+  id          String          @id @default(cuid())
+  ticketId    String
+  workspaceId String
+  type        TicketEventType
+
+  fromValue String?
+  toValue   String?
+
+  // Same snapshot rule. "Who did this" is the entire point of an audit row, so it has
+  // to outlive the actor's account.
+  actorId   String?
+  actorName String
+
+  createdAt DateTime @default(now())
+
+  ticket Ticket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  actor  User?  @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([ticketId, createdAt])
+  @@index([workspaceId])
+  @@map("ticket_event")
+}
+
+// ─── Email ───────────────────────────────────────────────────────────────────
+
+enum InboundEmailOutcome {
+  TICKET_CREATED
+  COMMENT_APPENDED
+  DUPLICATE
+  DROPPED
+}
+
+/// One row per inbound delivery, whether or not it produced anything.
+///
+/// It does two jobs, and both are load-bearing:
+///
+///  1. **Idempotency.** `@@unique([recipient, messageId])` is what makes a provider retry
+///     a no-op. The row is inserted as the *first* statement of the same transaction that
+///     creates the ticket or comment, so a retry hits the constraint and the whole
+///     transaction rolls back — a pre-check-then-insert would be the same read-then-write
+///     race `lockWorkspace` exists for.
+///
+///     `recipient` is in the key, not just `messageId`, because one provider POST can
+///     carry two workspaces' addresses (To: acme@…, Cc: globex@…). A unique on messageId
+///     alone would silently give the second workspace nothing.
+///
+///  2. **Answering "why didn't my email become a ticket".** Dropped mail gets a row with
+///     a `dropReason`. Without it, a silent drop is unanswerable — the mail is simply
+///     gone, and nobody can tell whether it ever arrived.
+///
+/// **Deliberately no foreign keys** to workspace, ticket or user. This is a log that has
+/// to outlive what it references: a Cascade would erase the audit trail when a ticket is
+/// deleted, and a Restrict would block deleting one. Same reasoning as the person
+/// snapshots on Ticket — ids are stored as plain strings and may dangle.
+model InboundEmail {
+  id String @id @default(cuid())
+
+  /// RFC 5322 Message-ID with angle brackets stripped and lowercased. When the header is
+  /// absent (rare but real for scripted senders) this is `sha256:<hex>` over the content,
+  /// which means two genuinely identical emails are treated as a retry. That is the right
+  /// trade: a duplicate ticket is worse than a dropped duplicate.
+  messageId String
+
+  /// The envelope recipient this delivery routed on, lowercased.
+  recipient String
+
+  fromEmail String
+  subject   String?
+
+  outcome    InboundEmailOutcome
+  /// Set only on DROPPED. One of the DropReason values in modules/email/email.types.ts.
+  dropReason String?
+
+  /// Plain strings, not relations — see the note above.
+  workspaceId String?
+  ticketId    String?
+
+  /// Filenames, MIME types and byte counts of the parts we drained. Attachments are not
+  /// stored anywhere (blocked on R2), so **the bytes are gone permanently** — this is a
+  /// record of what was lost, not a queue to replay later.
+  attachments Json?
+
+  /// Sender-authentication results as reported by the provider. Without these, `fromEmail`
+  /// is forgeable and "known senders only" secures nothing.
+  spfResult String?
+  dkimPass  Boolean?
+  spamScore Float?
+
+  receivedAt DateTime @default(now())
+
+  @@unique([recipient, messageId])
+  @@index([workspaceId, receivedAt])
+  @@index([fromEmail, receivedAt])
+  @@map("inbound_email")
+}
+
+enum OutboundEmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+/// What we tried to send and whether it left.
+///
+/// There is no BullMQ yet, so this table *is* the durability layer: a FAILED row is what a
+/// later retry worker would work from, and it is what the test suite asserts against
+/// instead of a real inbox. Written before the transport is called and updated after, so a
+/// crash mid-send leaves evidence rather than silence.
+model OutboundEmail {
+  id String @id @default(cuid())
+
+  workspaceId String?
+  ticketId    String?
+
+  toEmail String
+  subject String
+  /// 'ack' | 'comment' | 'status' — which notification this was.
+  kind    String
+
+  status     OutboundEmailStatus @default(QUEUED)
+  /// The provider's own id, for correlating with their dashboard. Not the RFC Message-ID:
+  /// SendGrid generates that itself and does not return it, which is exactly why threading
+  /// uses a token we mint rather than an outbound Message-ID.
+  providerId String?
+  error      String?
+
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+
+  @@index([ticketId, createdAt])
+  @@index([status, createdAt])
+  @@map("outbound_email")
 }

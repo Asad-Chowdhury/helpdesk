@@ -32,6 +32,17 @@ export function Navbar() {
         {/* Auth-dependent items are held empty until the session resolves, so they
             don't flash the signed-out state for an already-signed-in user. */}
         <div className="flex items-center gap-2">
+          {/* Every role has some access to tickets, so this is shown to anyone signed in —
+              unlike Users, which is admin-only. */}
+          {me && (
+            <Link
+              to="/tickets"
+              className="mr-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Tickets
+            </Link>
+          )}
+
           {isAdmin && (
             <Link
               to="/users"

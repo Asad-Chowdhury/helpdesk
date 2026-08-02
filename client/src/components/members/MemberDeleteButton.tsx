@@ -71,6 +71,9 @@ export function MemberDeleteButton({ workspaceId, member, disabled, onError }: P
               and signed out everywhere. If this is the only workspace they belong to,
               their account and sign-in details are erased completely. To keep their
               account and only revoke access, deactivate them instead.
+              {' '}
+              Their tickets, comments and activity history stay in this workspace under
+              their name — deleting a person does not delete the work.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

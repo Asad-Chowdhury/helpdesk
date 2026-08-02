@@ -8,6 +8,9 @@ import { clientOrigins, trustProxy } from './lib/env';
 import { requireAuth } from './middleware/require-auth';
 import { signupRouter } from './routes/signup';
 import { usersRouter } from './modules/users/users.routes';
+import { ticketsRouter } from './modules/tickets/tickets.routes';
+import { inboundEmailRouter } from './modules/email/inbound.routes';
+import { inboundEmailEnabled } from './lib/env';
 
 const app = express()
 const port = process.env.PORT || 3000;
@@ -28,6 +31,15 @@ app.use(
 // The bare `*` wildcard is Express 4 syntax; Express 5 would need `/api/auth/*splat`.
 app.all('/api/auth/*', toNodeHandler(auth))
 
+// Mounted BEFORE express.json() for the same reason the Better Auth handler is: it reads
+// the raw request stream itself (multipart, via busboy). body-parser checks Content-Type
+// before touching the stream so it would not consume a multipart body today — this is
+// insurance against that ever changing.
+//
+// Only mounted when MAIL_DOMAIN is configured: an unconfigured deploy then has no public
+// ingest endpoint at all, rather than one that accepts requests and discards them.
+if (inboundEmailEnabled) app.use(inboundEmailRouter)
+
 app.use(express.json())
 
 app.get('/api/health', (_req, res) => {
@@ -46,10 +58,12 @@ app.get('/api/db-health', requireAuth, async (_req, res) => {
   }
 })
 
-// Both need express.json(), so they mount after it — unlike the Better Auth handler.
-// usersRouter owns /api/me and the workspace membership routes.
+// These all need express.json(), so they mount after it — unlike the Better Auth handler.
+// usersRouter owns /api/me and the workspace membership routes; ticketsRouter owns the
+// workspace ticket routes.
 app.use(signupRouter)
 app.use(usersRouter)
+app.use(ticketsRouter)
 
 /**
  * Must be registered last, and must take four arguments for Express to treat it as an

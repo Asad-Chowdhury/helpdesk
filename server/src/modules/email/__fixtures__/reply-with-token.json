@@ -1,0 +1,11 @@
+{
+  "headers": "Message-ID: <CAF1e2reply@mail.gmail.com>\r\nIn-Reply-To: <notify-1@tickets.example.com>\r\nReferences: <notify-1@tickets.example.com>\r\nSubject: Re: [#1] Launch deck needs the new logo\r\nFrom: Sam Staff <sam@acme.test>\r\nTo: reply+00000000000000000000000000000000@tickets.example.com",
+  "dkim": "{@acme.test : pass}",
+  "to": "reply+00000000000000000000000000000000@tickets.example.com",
+  "from": "Sam Staff <sam@acme.test>",
+  "subject": "Re: [#1] Launch deck needs the new logo",
+  "text": "Friday works, thanks.\r\n\r\nOn Sat, 1 Aug 2026 at 10:05, Helpdesk <notifications@tickets.example.com> wrote:\r\n> We have picked this up and will have it back to you shortly.\r\n",
+  "envelope": "{\"to\":[\"reply+00000000000000000000000000000000@tickets.example.com\"],\"from\":\"sam@acme.test\"}",
+  "SPF": "pass",
+  "spam_score": "0.1"
+}

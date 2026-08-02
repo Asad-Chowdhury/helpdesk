@@ -74,3 +74,80 @@ if (!authSecret) {
       'Sessions will be invalidated once you set a real one.',
   )
 }
+
+// ─── Inbound email ───────────────────────────────────────────────────────────
+
+/**
+ * Domains whose mail becomes tickets, e.g. `tickets.example.com`.
+ *
+ * Comma-separated, like CLIENT_ORIGIN. **Empty means inbound email is switched off** —
+ * the webhook route is not mounted at all, so an unconfigured deploy has no public
+ * ingest endpoint rather than one that accepts and discards.
+ */
+export const mailDomains = (process.env.MAIL_DOMAIN ?? '')
+  .split(',')
+  .map((d) => d.trim().toLowerCase())
+  .filter(Boolean)
+
+export const inboundEmailEnabled = mailDomains.length > 0
+
+/**
+ * HTTP Basic credentials for the inbound webhook.
+ *
+ * The provider does not sign Inbound Parse requests, so this shared secret is the only
+ * thing standing between the internet and an endpoint that writes tickets. Credentials go
+ * in the destination URL the provider is configured with.
+ *
+ * Basic auth rather than a secret path segment so the secret stays out of request lines,
+ * access logs and anything that forwards a URL.
+ */
+export const inboundWebhookUser = process.env.INBOUND_WEBHOOK_USER ?? 'inbound'
+export const inboundWebhookPassword = process.env.INBOUND_WEBHOOK_PASSWORD
+
+const MIN_WEBHOOK_PASSWORD_LENGTH = 32
+
+if (inboundEmailEnabled && !isDevelopment && !isTest) {
+  if (!inboundWebhookPassword) {
+    throw new Error(
+      'MAIL_DOMAIN is set but INBOUND_WEBHOOK_PASSWORD is not. The inbound webhook is a ' +
+        'public write endpoint and must not run unauthenticated.\n' +
+        'Generate one with: openssl rand -base64 32',
+    )
+  }
+  if (inboundWebhookPassword.length < MIN_WEBHOOK_PASSWORD_LENGTH) {
+    throw new Error(
+      `INBOUND_WEBHOOK_PASSWORD must be at least ${MIN_WEBHOOK_PASSWORD_LENGTH} characters.`,
+    )
+  }
+}
+
+/**
+ * Hard cap on an inbound request body.
+ *
+ * Express has no global byte limit for a content type no parser claims, so without this
+ * the endpoint would accept a body of any size. 35 MB sits just above SendGrid's ~30 MB
+ * ceiling, so it only ever trips on abuse, never on a delivery we would then be asked to
+ * retry forever.
+ */
+export const inboundMaxBytes = (() => {
+  const raw = process.env.INBOUND_MAX_BYTES ?? '36700160'
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error(`INBOUND_MAX_BYTES must be a positive integer, got "${raw}"`)
+  }
+  return value
+})()
+
+/**
+ * Whether a message must pass SPF/DKIM to be accepted.
+ *
+ * **On by default outside development, and it matters more than it looks.** "Known senders
+ * only" matches on the From address, which is trivially forgeable over SMTP — without an
+ * authentication check it is not a security control at all, it just tells an attacker
+ * which address to forge.
+ *
+ * Off in local simulation, where there is no real MTA to produce a result.
+ */
+export const inboundRequireAuthResults =
+  (process.env.INBOUND_REQUIRE_AUTH_RESULTS ?? (isDevelopment || isTest ? 'false' : 'true')) ===
+  'true'

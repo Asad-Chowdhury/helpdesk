@@ -103,3 +103,53 @@ export const changePasswordSchema = z
   })
 
 export type ChangePasswordValues = z.infer<typeof changePasswordSchema>
+
+/**
+ * New ticket. Mirrors `createTicketSchema` in
+ * `server/src/modules/tickets/tickets.schemas.ts` — same limits, same messages.
+ *
+ * `categoryId` and `assigneeId` use '' as the "none" value rather than undefined, because
+ * a Select's empty option has to carry a string. The submit handler converts '' to null,
+ * which is what the API means by "clear this".
+ */
+export const createTicketSchema = z.object({
+  subject: z
+    .string()
+    .trim()
+    .min(1, { error: 'Subject is required' })
+    .max(200, { error: 'Subject is too long' }),
+  description: z
+    .string()
+    .trim()
+    .min(1, { error: 'Description is required' })
+    .max(10_000, { error: 'Description is too long' }),
+  categoryId: z.string().optional(),
+  assigneeId: z.string().optional(),
+  priority: z.enum(['LOW', 'NORMAL', 'MEDIUM', 'HIGH', 'URGENT']).optional(),
+})
+
+export type CreateTicketValues = z.infer<typeof createTicketSchema>
+
+/** Editing an existing ticket's request text and category. Same rules as creating one. */
+export const editTicketSchema = createTicketSchema.pick({
+  subject: true,
+  description: true,
+  categoryId: true,
+})
+
+export type EditTicketValues = z.infer<typeof editTicketSchema>
+
+/**
+ * A comment or an internal note — the same form, with `internal` deciding which. Mirrors
+ * `createCommentSchema` on the server.
+ */
+export const ticketCommentSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, { error: 'Write something first' })
+    .max(10_000, { error: 'Comment is too long' }),
+  internal: z.boolean().optional(),
+})
+
+export type TicketCommentValues = z.infer<typeof ticketCommentSchema>

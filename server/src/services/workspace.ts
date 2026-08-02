@@ -29,15 +29,56 @@ function slugify(input: string): string {
 }
 
 /**
+ * Slugs a workspace may not have, because the slug is also its inbound email local part
+ * (`<slug>@MAIL_DOMAIN` — see modules/email/addressing.ts).
+ *
+ * Two groups, and both matter:
+ *   - **Mail infrastructure names.** `postmaster` and `abuse` are mandated by RFC 2142 and
+ *     must reach a human, not a ticket queue. `mailer-daemon` and `bounces` receive
+ *     delivery failures, which would otherwise loop back in as tickets.
+ *   - **Names we mint ourselves.** `reply` is the prefix of every threading address
+ *     (`reply+<token>@`), so a workspace called "Reply" would collide with the reply
+ *     router. The rest are reserved against future use (`www`, `api`, `app`) and against
+ *     confusion (`admin`, `support`, `no-reply`).
+ *
+ * This has to be enforced *before* any slug becomes a published address: retro-fixing it
+ * means renaming a live workspace's inbound address, which breaks every thread already
+ * pointing at it.
+ */
+const RESERVED_SLUGS = new Set([
+  'reply',
+  'no-reply',
+  'noreply',
+  'postmaster',
+  'abuse',
+  'mailer-daemon',
+  'bounces',
+  'bounce',
+  'admin',
+  'support',
+  'help',
+  'www',
+  'api',
+  'app',
+  'mail',
+  'workspace',
+])
+
+/**
  * Resolves a slug that is free *right now*. This is advisory only — the check and the
  * insert can't be atomic, so the unique constraint on workspace.slug stays the real
  * guarantee and the caller retries when it loses the race.
  *
  * `randomise` skips straight to a suffixed candidate, used on retry so a concurrent
  * signup with the same workspace name doesn't just collide again.
+ *
+ * A reserved base is suffixed rather than rejected: the workspace *name* is fine, it is
+ * only the derived address that would clash, and failing someone's signup because they
+ * called their company "Support" would be absurd.
  */
 async function resolveSlug(name: string, randomise = false): Promise<string> {
-  const base = slugify(name) || 'workspace'
+  const slugged = slugify(name) || 'workspace'
+  const base = RESERVED_SLUGS.has(slugged) ? `${slugged}-team` : slugged
 
   if (randomise) return `${base}-${crypto.randomUUID().slice(0, 8)}`
 

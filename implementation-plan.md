@@ -19,7 +19,7 @@ Note: two MVP features didn't have an obvious slot in this 8-phase structure —
 - [ ] Environment variable/secrets structure per service
 - [ ] Basic CI: lint, typecheck, build on push
 - [ ] Provision Railway project (staging) with Postgres + Redis addons
-- [ ] Design Prisma schema: `Workspace`, `User`, `Role`, `Category`, `Ticket`, `Comment`, `InternalNote`, `Attachment`, `Deliverable`, `ActivityLog`, `SLAConfig` — every tenant-scoped table carries `workspaceId`
+- [x] Design Prisma schema: `Workspace`, `User`, `Role`, `Category`, `Ticket`, `TicketComment` (comments *and* internal notes, distinguished by a flag), `TicketEvent` (activity log) — every tenant-scoped table carries `workspaceId`. *`Attachment`/`Deliverable` await R2; `SLAConfig` awaits the SLA work in Phase 4.* **Anything referencing `User` must use a nullable FK + `onDelete: SetNull` plus a name/email snapshot — never `Cascade` — so deleting a person never deletes the work; see CLAUDE.md.**
 - [ ] Build a Prisma Client Extension/wrapper that auto-scopes queries by `workspaceId` — build and test this before any feature work depends on it; it's the primary defense against cross-tenant data leaks
 - [ ] Seed script: bootstrap a sample Workspace + Admin account + sample categories/tickets for local dev
 - [ ] Cross-tenant isolation test harness, running in CI from day one
@@ -67,12 +67,12 @@ Note: two MVP features didn't have an obvious slot in this 8-phase structure —
 - [ ] File upload: presigned URL to Cloudflare R2, attach to ticket
 - [ ] Draft requests (save incomplete submissions, resume later)
 - [ ] Basic CSV import of existing backlog at onboarding
-- [ ] Unified ticket list/queue page: search, filters, sorting, bulk actions, activity history
-- [ ] Ticket detail page: comments, internal notes, attachments, deliverables
-- [ ] Fixed ticket statuses (Requested/Open/Resolved/Closed), transitions restricted to Staff/Manager, no renaming in MVP
-- [ ] Manual assignment
+- [x] Unified ticket list/queue page: search, filters, sorting, activity history — *bulk actions still to do*
+- [x] Ticket detail page: comments, internal notes — *attachments and deliverables blocked on R2 (see the file-upload item above)*
+- [x] Fixed ticket statuses (Requested/Open/Resolved/Closed), transitions restricted to Staff/Manager, no renaming in MVP — Staff are further limited to tickets assigned to them
+- [x] Manual assignment (Admin/Manager only)
 - [ ] Basic automatic routing rules (category → default assignee/team)
-- [ ] Priority field: 5 levels (Low/Normal/Medium/High/Urgent), manual override restricted to Admin
+- [x] Priority field: 5 levels (Low/Normal/Medium/High/Urgent), manual override restricted to Admin — *initial value defaults to Normal until the Phase 5 AI categorisation sets it*
 - [ ] SLA setup UI: Admin sets a timeframe per category
 - [ ] BullMQ job: periodic SLA-deadline check per open ticket, auto priority escalation — resolve the escalation-threshold and "impact on requester" open questions before building the scoring logic
 - [ ] Client-facing ticket view (magic-link portal): live status, comments, deliverable download, request history, "raise ticket" flow gated by the client's permission

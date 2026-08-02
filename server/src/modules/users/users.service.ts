@@ -1,6 +1,8 @@
 import type { Role } from '../../generated/prisma/enums'
 import { auth } from '../../lib/auth'
 import { prisma } from '../../lib/prisma'
+import { revokeSessionsWithoutAccess } from '../../lib/workspace-access'
+import { lockWorkspace, type Tx } from '../../lib/workspace-lock'
 import { EmailTakenError, newId, uniqueViolationOn } from '../../services/workspace'
 
 export class AlreadyMemberError extends Error {
@@ -243,26 +245,6 @@ export async function addMember(input: AddMemberInput) {
   }
 }
 
-type Tx = Parameters<Parameters<typeof prisma.$transaction>[0]>[0]
-
-/**
- * Serialises every membership mutation for one workspace.
- *
- * Being inside a transaction is NOT enough to make the last-admin rule hold. Prisma
- * runs at the Postgres default of READ COMMITTED and `count()` takes no locks, so two
- * concurrent transactions demoting *different* admins each still see the other one as
- * active — neither has committed yet — and both pass the check. The workspace ends up
- * with zero admins, which nothing in the app can undo: every route is behind
- * requireWorkspaceRole('ADMIN'), so no one is left who can promote a replacement.
- *
- * Locking the workspace row makes the read-then-write actually atomic against other
- * writers here. It is a plain row lock, not the full workspace: readers elsewhere are
- * unaffected, and these are low-frequency admin actions.
- */
-async function lockWorkspace(tx: Tx, workspaceId: string) {
-  await tx.$queryRaw`SELECT id FROM workspace WHERE id = ${workspaceId} FOR UPDATE`
-}
-
 /** Active admins in the workspace other than `exceptMembershipId`. */
 async function otherActiveAdminCount(
   tx: Tx,
@@ -341,11 +323,19 @@ export async function setMemberActive(input: SetMemberActiveInput) {
       }
     }
 
-    return tx.membership.update({
+    const member = await tx.membership.update({
       where: { id: current.id },
       data: { deactivatedAt: input.active ? null : new Date() },
       select: MEMBER_SELECT,
     })
+
+    // Deactivation has to take effect now, not whenever their cookie expires. Sessions are
+    // not workspace-scoped, so this only signs them out when they have no active membership
+    // left anywhere — someone still active in another workspace keeps their session.
+    // Inside the transaction so it commits with the deactivation that caused it.
+    if (!input.active) await revokeSessionsWithoutAccess(tx, current.userId)
+
+    return member
   })
 }
 
@@ -411,11 +401,21 @@ export async function deleteMember(input: DeleteMemberInput): Promise<DeleteMemb
 
     if (elsewhere > 0) {
       await tx.membership.delete({ where: { id: current.id } })
+      // They keep the account, but if every membership they have left is deactivated they
+      // no longer have access to anything — so the session goes too, same rule as above.
+      await revokeSessionsWithoutAccess(tx, current.userId)
       return { deleted: 'membership' }
     }
 
     // Cascades to session (signing them out everywhere), account (their credential)
     // and this membership.
+    //
+    // It deliberately does NOT reach their tickets. Ticket, TicketComment and TicketEvent
+    // hold this person through nullable `onDelete: SetNull` foreign keys alongside a
+    // name/email snapshot, so those rows survive with their attribution intact and only
+    // the pointer is cleared. A workspace's record of its work is not one member's to
+    // destroy. Anything added later that references User must make the same choice
+    // explicitly — see the note above `model Ticket` in schema.prisma.
     await tx.user.delete({ where: { id: current.userId } })
     return { deleted: 'account' }
   })
